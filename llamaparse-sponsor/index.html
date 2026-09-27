@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LlamaParse Sponsor Spot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600;700&display=swap">
+<style>
+  :root { --bg: #0f0d16; --panel: #1a1724; --ink: #f1eef8; --sub: #9a94ad; --line: #2c283a; --accent: #9a5cff; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg: #ebe8f2; --panel: #ffffff; --ink: #15121f; --sub: #6d6882; --line: #dcd7e6; } }
+  :root[data-theme="dark"] { --bg: #0f0d16; --panel: #1a1724; --ink: #f1eef8; --sub: #9a94ad; --line: #2c283a; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: 'Geist', system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  #wrap { flex: 1; min-height: 0; position: relative; display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; }
+  #frame { position: relative; overflow: hidden; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+  #stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; overflow: hidden; background: #f6f4fb; }
+  #bar { flex-shrink: 0; background: var(--panel); border-top: 1px solid var(--line); padding: 10px 16px 14px; display: flex; flex-direction: column; gap: 8px; }
+  #row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  button, label.btn { font: 600 14px 'Geist', system-ui, sans-serif; color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 999px; height: 34px; padding: 0 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  button:hover, label.btn:hover { border-color: var(--accent); }
+  #play { background: var(--accent); border-color: var(--accent); color: #fff; min-width: 84px; justify-content: center; }
+  #time { font: 500 14px 'Geist Mono', ui-monospace, monospace; color: var(--sub); min-width: 110px; }
+  #scene { font: 500 14px 'Geist', system-ui, sans-serif; color: var(--ink); flex: 1; min-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #track { position: relative; height: 26px; cursor: pointer; touch-action: none; }
+  #rail { position: absolute; left: 0; right: 0; top: 11px; height: 4px; border-radius: 2px; background: var(--line); }
+  #fill { position: absolute; left: 0; top: 11px; height: 4px; border-radius: 2px; background: linear-gradient(90deg, #ff5fa8, #9a5cff, #5b7cff); }
+  #head { position: absolute; top: 5px; width: 16px; height: 16px; margin-left: -8px; border-radius: 8px; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+  .tick { position: absolute; top: 6px; width: 2px; height: 14px; margin-left: -1px; background: var(--sub); opacity: .5; border-radius: 1px; }
+  input[type=file] { display: none; }
+  .hint { font-size: 12px; color: var(--sub); }
+  @media (max-width: 640px) { .hint { display: none; } }
+  body.render #bar { display: none; } body.render #wrap { padding: 0; } body.render #frame { border-radius: 0; box-shadow: none; }
+</style>
+</head>
+<body>
+<div id="wrap"><div id="frame"><div id="stage"></div></div></div>
+<div id="bar">
+  <div id="track"><div id="rail"></div><div id="fill"></div><div id="head"></div></div>
+  <div id="row">
+    <button id="play">Play</button>
+    <button id="restart">↺</button>
+    <span id="time">0.0 / 0.0</span>
+    <span id="scene"></span>
+    <label class="btn" title="Load your voiceover; it becomes the master clock">Add voiceover<input id="vo" type="file" accept="audio/*"></label>
+    <span class="hint">Space: play · ←/→: scrub</span>
+  </div>
+</div>
+<script src="timing.js"></script>
+<script src="piece.js"></script>
+<script>
+(function () {
+  const P = window.PIECE, TM = window.TIMING;
+  const q = new URLSearchParams(location.search);
+  const stage = document.getElementById('stage'), frame = document.getElementById('frame'), wrap = document.getElementById('wrap');
+  const fillEl = document.getElementById('fill'), headEl = document.getElementById('head'), track = document.getElementById('track');
+  const timeEl = document.getElementById('time'), sceneEl = document.getElementById('scene'), playBtn = document.getElementById('play');
+  if (q.has('render')) document.body.classList.add('render');
+
+  let T = parseFloat(q.get('t') || '0') || 0, playing = false, last = 0, audio = null;
+  const names = Object.keys(TM.cues);
+  names.forEach((n) => { const d = document.createElement('div'); d.className = 'tick'; d.style.left = (TM.cues[n] / P.END * 100) + '%'; d.title = n; track.appendChild(d); });
+
+  function fit() {
+    const W = wrap.clientWidth - (document.body.classList.contains('render') ? 0 : 32), H = wrap.clientHeight - (document.body.classList.contains('render') ? 0 : 32);
+    const k = Math.min(W / P.W, H / P.H);
+    frame.style.width = P.W * k + 'px'; frame.style.height = P.H * k + 'px';
+    stage.style.transform = `scale(${k})`;
+  }
+  function draw() {
+    stage.innerHTML = P.render(T);
+    const p = T / P.END * 100;
+    fillEl.style.width = p + '%'; headEl.style.left = p + '%';
+    timeEl.textContent = `${T.toFixed(1)} / ${P.END.toFixed(1)}`;
+    let cur = names[0]; names.forEach((n) => { if (T >= TM.cues[n]) cur = n; });
+    const line = TM.SCRIPT.find(([n]) => n === cur);
+    sceneEl.textContent = line ? `${cur} — ${line[1]}` : cur;
+  }
+  function setT(t) { T = Math.max(0, Math.min(P.END, t)); if (audio && !playing) audio.currentTime = Math.min(T, audio.duration || T); draw(); }
+  function loop(now) {
+    if (!playing) return;
+    if (audio && !audio.paused) T = audio.currentTime; // audio is the master clock
+    else T += (now - last) / 1000;
+    last = now;
+    if (T >= P.END) { T = P.END; draw(); pause(); return; }
+    draw(); requestAnimationFrame(loop);
+  }
+  function play() {
+    if (T >= P.END - 0.01) T = 0;
+    playing = true; playBtn.textContent = 'Pause'; last = performance.now();
+    if (audio) { audio.currentTime = T; audio.play().catch(() => {}); }
+    requestAnimationFrame(loop);
+  }
+  function pause() { playing = false; playBtn.textContent = 'Play'; if (audio) audio.pause(); }
+  playBtn.onclick = () => (playing ? pause() : play());
+  document.getElementById('restart').onclick = () => { pause(); setT(0); };
+  document.getElementById('vo').onchange = (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    if (audio) audio.pause();
+    audio = new Audio(URL.createObjectURL(f)); audio.preload = 'auto';
+  };
+  const scrub = (e) => { const r = track.getBoundingClientRect(); setT((e.clientX - r.left) / r.width * P.END); };
+  track.addEventListener('pointerdown', (e) => { const was = playing; pause(); scrub(e); track.setPointerCapture(e.pointerId);
+    const mv = (ev) => scrub(ev); const up = () => { track.removeEventListener('pointermove', mv); track.removeEventListener('pointerup', up); if (was) play(); };
+    track.addEventListener('pointermove', mv); track.addEventListener('pointerup', up); });
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') { e.preventDefault(); playing ? pause() : play(); }
+    if (e.code === 'ArrowRight') setT(T + (e.shiftKey ? 5 : 1));
+    if (e.code === 'ArrowLeft') setT(T - (e.shiftKey ? 5 : 1));
+  });
+  window.addEventListener('resize', fit);
+  window.__seek = (t) => { T = t; stage.innerHTML = P.render(T); };
+  fit(); draw();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { fit(); draw(); });
+  if (q.has('autoplay')) play();
+})();
+</script>
+</body>
+</html>
